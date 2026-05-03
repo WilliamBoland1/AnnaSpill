@@ -1,0 +1,140 @@
+/* -----------------------------------------------------------
+   Reset & page chrome
+----------------------------------------------------------- */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0b1020;
+  font-family: Georgia, 'Times New Roman', serif;
+  color: #f6e9d2;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Canvas fills the screen; we scale the drawing buffer in JS */
+#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  touch-action: none;
+}
+
+/* -----------------------------------------------------------
+   Overlay screens (start / win / lose)
+----------------------------------------------------------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  background: radial-gradient(ellipse at center, rgba(20, 15, 40, 0.55) 0%, rgba(5, 5, 15, 0.85) 100%);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  z-index: 10;
+}
+.overlay.hidden { display: none !important; }
+.hidden { display: none !important; }
+
+.overlay h1 {
+  font-size: clamp(32px, 7vw, 64px);
+  font-weight: normal;
+  letter-spacing: 0.02em;
+  margin-bottom: 12px;
+  color: #ffd89b;
+  text-shadow: 0 2px 20px rgba(255, 180, 100, 0.4);
+}
+.overlay h2 {
+  font-size: clamp(18px, 3vw, 28px);
+  font-weight: normal;
+  font-style: italic;
+  margin-bottom: 28px;
+  color: #f6e9d2;
+  opacity: 0.9;
+}
+.overlay p.score {
+  font-size: clamp(16px, 2.5vw, 22px);
+  margin-bottom: 24px;
+  color: #e8c88a;
+}
+.overlay .btn {
+  display: inline-block;
+  padding: 18px 36px;
+  font-size: clamp(16px, 2.5vw, 22px);
+  font-family: inherit;
+  color: #1a0f2e;
+  background: linear-gradient(135deg, #ffd89b 0%, #f4a261 100%);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(244, 162, 97, 0.4), 0 0 0 1px rgba(255, 216, 155, 0.3) inset;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  text-decoration: none;
+  letter-spacing: 0.03em;
+}
+.overlay .btn:hover, .overlay .btn:active {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 12px 32px rgba(244, 162, 97, 0.55), 0 0 0 1px rgba(255, 216, 155, 0.5) inset;
+}
+.overlay .btn.prize {
+  font-size: clamp(18px, 3vw, 26px);
+  padding: 22px 44px;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+#retryBtn {
+  margin-top: 24px;
+}
+
+/* -----------------------------------------------------------
+   Win screen — staggered entrance animation
+----------------------------------------------------------- */
+@keyframes winOverlayIn {
+  from { opacity: 0; transform: scale(0.94) translateY(18px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0);    }
+}
+@keyframes winTitlePop {
+  0%   { opacity: 0; transform: scale(0.55); letter-spacing: 0.3em; }
+  65%  { transform: scale(1.07); }
+  100% { opacity: 1; transform: scale(1);    letter-spacing: 0.02em; }
+}
+@keyframes winItemRise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+#winScreen.show {
+  animation: winOverlayIn 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+#winScreen.show h1 {
+  animation: winTitlePop 0.85s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
+}
+#winScreen.show h2 {
+  animation: winItemRise 0.55s ease 0.45s both;
+}
+#winScreen.show p.score {
+  animation: winItemRise 0.55s ease 0.60s both;
+}
+#winScreen.show .btn.prize {
+  /* delay entrance, then hand off to the pulse loop */
+  animation: winItemRise 0.55s ease 0.78s both,
+             pulse 2s ease-in-out 1.35s infinite;
+}
+
+.hint {
+  margin-top: 20px;
+  font-size: clamp(13px, 1.8vw, 16px);
+  opacity: 0.7;
+  font-style: italic;
+}

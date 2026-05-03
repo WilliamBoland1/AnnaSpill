@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Tyholt Backyard Ultra</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<!-- Start screen -->
+<div id="startScreen" class="overlay">
+  <h1>Tyholt Backyard Ultra</h1>
+  <p class="score">Mål: nå en poengsum på <strong>81 for premie</strong></p>
+  <button class="btn" id="startBtn">Start</button>
+  <p class="hint">↑ / Space / trykk øverst = hopp &nbsp;·&nbsp; ↓ / S / trykk nederst = bøy deg</p>
+</div>
+
+<!-- Win screen -->
+<div id="winScreen" class="overlay hidden">
+  <h1>Du klarte det! 🎉</h1>
+  <h2>Du nådde 81</h2>
+  <p class="score">Sluttpoeng: <span id="winScore">81</span></p>
+  <!-- ============================================================
+       PRIZE LINK GOES HERE — replace href="#" below with the real URL
+       ============================================================ -->
+  <a class="btn prize" id="prizeBtn" href="https://williamboland1.github.io/Anna/" target="_blank" rel="noopener">
+    Trykk her for å hente premien din 🎁
+  </a>
+</div>
+
+<!-- Game over screen -->
+<div id="loseScreen" class="overlay hidden">
+  <a class="btn prize hidden" id="losePrizeBtn" href="https://williamboland1.github.io/Anna/" target="_blank" rel="noopener">
+    Trykk her for å hente premien din 🎁
+  </a>
+  <button class="btn" id="retryBtn">Prøv igjen</button>
+</div>
+
+<script>
+'use strict';
+
+/* =====================================================================
+   Run to 81 — a birthday endless runner set in a dusk Tyholt skyline.
+
+   HOW IT WORKS:
+   - The player is fixed on screen; the world scrolls left past them.
+   - Score rises over time. The goal is to survive until score = 81.
+   - At 81 a finish line and toast appear, but the game keeps going.
+   - The end screen adapts: reaching 81 unlocks the prize link.
+
+   Single HTML file — vanilla JS + Canvas API, no libraries.
+   ===================================================================== */
+
+// ---- Canvas setup -------------------------------------------------------
+// All game logic uses a fixed "virtual" coordinate space (900 × 400 px).
+// A CSS transform scales that up to fit any real screen size, so gameplay
+// code never needs to worry about actual device pixel counts.
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+
+const VIRTUAL_W = 900;  // virtual game width  — all coordinates use this
+const VIRTUAL_H = 400;  // virtual game height
+
+let scale   = 1;  // CSS pixels per virtual pixel (updated on resize)
+let offsetX = 0;  // horizontal letterbox margin in CSS pixels
+let offsetY = 0;  // vertical   letterbox margin in CSS pixels
+
+// Recalculates the canvas size and transform whenever the window is resized.
+function resize() {
+  const dpr  = window.devicePixelRatio || 1;  // 2 on retina screens
+  const cssW = window.innerWidth;
+  const cssH = window.innerHeight;
+
+  // Scale the 900×400 virtual canvas to fill the screen, keeping aspect ratio.
+  const s = Math.min(cssW / VIRTUAL_W, cssH / VIRTUAL_H);
+  scale   = s;
+  offsetX = (cssW - VIRTUAL_W * s) / 2;
+  offsetY = (cssH - VIRTUAL_H * s) / 2;
+
+  // Physical backing store is in device pixels so retina screens stay sharp.
+  canvas.width        = Math.round(cssW * dpr);
+  canvas.height       = Math.round(cssH * dpr);
+  canvas.style.width  = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+
+  // One transform maps every draw call from virtual coords → device pixels.
+  ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * offsetX, dpr * offsetY);
+  ctx.imageSmoothingEnabled = true;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---- Player head image --------------------------------------------------
+// Place head.png in the same folder to use a real photo as the player's head.
+// If the file is missing the game falls back to a plain orange circle.
+const headImg = new Image();
+let headLoaded = false;
+headImg.onload  = () => { headLoaded = true; };
+headImg.onerror = () => { headLoaded = false; };
+headImg.src = 'head.png';
+
+// Pedestrian obstacle image — loaded from images/pedestrian.png.
+// Falls back to the wrapped-gift rendering if the file is missing.
+const pedestrianImg = new Image();
+let pedestrianLoaded = false;
+pedestrianImg.onload  = () => { pedestrianLoaded = true; };
+pedestrianImg.onerror = () => { pedestrianLoaded = false; };
+pedestrianImg.src = 'images/pedestrian.png';
+
+// Player sprite images. Each covers the full body so head/legs are not drawn separately.
+// running.png  — used while upright (on ground or in the air)
+// crouching.png — used while ducking on the ground
+const runningImg = new Image();
+let runningLoaded = false;
+runningImg.onload  = () => { runningLoaded = true; };
+runningImg.onerror = () => { runningLoaded = false; };
+runningImg.src = 'images/running.png';
+
+const crouchingImg = new Image();
+let crouchingLoaded = false;
+crouchingImg.onload  = () => { crouchingLoaded = true; };
+crouchingImg.onerror = () => { crouchingLoaded = false; };
+crouchingImg.src = 'images/crouching.png';
+
+// ---- Game constants -----------------------------------------------------
+// These values control the feel and difficulty. Tweak them to adjust the game.
+const GROUND_Y = 340;           // y-coordinate of the ground surface
+const PLAYER_X = VIRTUAL_W * 0.20;  // player is fixed at 20% from the left
+
+const PLAYER_W       = 34;  // player body width
+const PLAYER_H_STAND = 70;  // full height when standing (body + head)
+const PLAYER_H_DUCK  = 42;  // squashed height when ducking
+const HEAD_R         = 16;  // radius of the head circle
+
+const GRAVITY       = 0.75;   // downward pull per frame at 60 fps
+const JUMP_VELOCITY = -14.2;  // upward speed at the moment of a jump (negative = up)
+
+const SCROLL_SPEED     = 4.3;   // pixels the world moves per frame — constant, no ramp
+const SCORE_PER_SECOND = 1.15;  // points earned per second; tuned so 81 takes ~70 s
+
+// Finish-line lead: spawn the line at the right edge so it reaches PLAYER_X exactly at score 81.
+// travel_px ÷ (SCROLL_SPEED px/frame × 60 frame/s) = travel_seconds;  × SCORE_PER_SECOND = score lead.
+const FINISH_SPAWN_X         = VIRTUAL_W + 20;
+const FINISH_SPAWN_THRESHOLD = 81 - ((FINISH_SPAWN_X - PLAYER_X) / (SCROLL_SPEED * (1000 / 16.67))) * SCORE_PER_SECOND;
+
+// Distance (in scrolled pixels) between obstacle spawns, chosen randomly each time.
+// At 4.3 px/frame × 60 fps ≈ 258 px/s → 320–560 px gives roughly 1.2–2.2 s gaps.
+const SPAWN_MIN_DIST = 320;
+const SPAWN_MAX_DIST = 560;
+
+// Obstacle hitbox sizes.
+const TALL_W = 26, TALL_H = 58;  // gift box  — player must jump over it
+const LOW_W  = 60, LOW_H  = 22;  // seagull   — player must duck under it
+
+// ---- Game state ---------------------------------------------------------
+// The four screens/modes the game can be in at any given moment.
+const STATE = { START: 'start', PLAYING: 'playing', WIN: 'win', LOSE: 'lose' };
+let state = STATE.START;
+
+// Per-round variables — all reset by resetGame() at the start of each run.
+let player, obstacles, distSinceSpawn, nextSpawnDist, score, scoreFloat, bgOffsets;
+
+// Best score is saved to localStorage so it survives page refreshes.
+let bestScore = Number(localStorage.getItem('runTo81_best') || 0);
+
+// Milestone state for the "reach 81 but keep running" mechanic.
+let reached81;       // true once the player's score has passed 81
+let toastStartTime;  // performance.now() timestamp when the toast was triggered; -1 = inactive
+let finishLineX;     // x-position of the scrolling checkered finish line; -999 = off screen
+
+const TOAST_DURATION = 4200;  // total time (ms) the milestone toast is visible (including fades)
+
+// Resets everything to a clean starting state. Called on first load and on every retry.
+function resetGame() {
+  player = {
+    x: PLAYER_X,
+    y: GROUND_Y - PLAYER_H_STAND,  // feet sitting on the ground
+    vy: 0,                           // vertical velocity (positive = downward)
+    w: PLAYER_W,
+    h: PLAYER_H_STAND,
+    onGround: true,
+    ducking: false,
+    runCycle: 0,  // accumulates time to drive the leg-swing animation
+  };
+  obstacles      = [];
+  distSinceSpawn = 0;
+  nextSpawnDist  = randRange(SPAWN_MIN_DIST, SPAWN_MAX_DIST);
+  score          = 0;
+  scoreFloat     = 0;      // fractional accumulator; score is always Math.floor(scoreFloat)
+  bgOffsets      = { far: 0, mid: 0, near: 0 };  // how far each parallax layer has scrolled
+  reached81      = false;
+  toastStartTime = -1;
+  finishLineX    = -999;
+}
+resetGame();
+
+// ---- Input --------------------------------------------------------------
+// Three input methods all funnel into the same three actions.
+
+function tryJump() {
+  if (state !== STATE.PLAYING) return;
+  if (player.onGround && !player.ducking) {  // can only jump from the ground
+    player.vy       = JUMP_VELOCITY;
+    player.onGround = false;
+  }
+}
+function startDuck() {
+  if (state !== STATE.PLAYING) return;
+  if (player.onGround) player.ducking = true;  // ducking mid-air has no effect
+}
+function endDuck() {
+  player.ducking = false;
+}
+
+// Keyboard: Up / Space / W = jump,  Down / S = duck (held down to stay crouched).
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;  // ignore key-repeat events from holding a key
+  if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') {
+    e.preventDefault(); tryJump();
+  } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+    e.preventDefault(); startDuck();
+  }
+});
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'ArrowDown' || e.code === 'KeyS') endDuck();
+});
+
+// Touch: tap the top half of the screen to jump, bottom half to duck.
+// passive: false is required so we can call preventDefault() and block page scrolling.
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.clientY < window.innerHeight / 2) tryJump();
+    else startDuck();
+  }
+}, { passive: false });
+canvas.addEventListener('touchend', (e) => { e.preventDefault(); endDuck(); }, { passive: false });
+
+// Mouse: same split-screen logic as touch — top = jump, bottom = duck.
+canvas.addEventListener('mousedown', (e) => {
+  if (e.clientY < window.innerHeight / 2) tryJump(); else startDuck();
+});
+canvas.addEventListener('mouseup', () => endDuck());
+
+// ---- Utilities ----------------------------------------------------------
+
+// Returns a random float between a (inclusive) and b (exclusive).
+function randRange(a, b) { return a + Math.random() * (b - a); }
+
+// Axis-aligned bounding-box collision with a 3 px inset on each side.
+// The inset makes near-misses feel fair rather than frustratingly cheap.
+function rectsOverlap(a, b) {
+  const pad = 3;
+  return (
+    a.x + pad < b.x + b.w &&
+    a.x + a.w - pad > b.x &&
+    a.y + pad < b.y + b.h &&
+    a.y + a.h - pad > b.y
+  );
+}
+
+// ---- Obstacle spawning --------------------------------------------------
+
+function spawnObstacle() {
+  const isTall = Math.random() < 0.5;  // 50 / 50 chance of each type
+  if (isTall) {
+    obstacles.push({
+      type:  'tall',
+      x:     VIRTUAL_W + 20,      // spawn just off the right edge of the screen
+      y:     GROUND_Y - TALL_H,
+      w:     TALL_W,
+      h:     TALL_H,
+      color: Math.floor(Math.random() * 3),  // 0=red 1=blue 2=green — fixed at spawn
+    });
+  } else {
+    // The seagull's y is chosen so the player MUST duck, but the ducked hitbox fits under it.
+    const LOW_Y = GROUND_Y - PLAYER_H_STAND + 4;
+    obstacles.push({ type: 'low', x: VIRTUAL_W + 20, y: LOW_Y, w: LOW_W, h: LOW_H });
+  }
+}
+
+// ---- Update loop --------------------------------------------------------
+let lastTime = performance.now();
+
+function update(dtMs) {
+  // Convert ms since last frame into a frame-count equivalent.
+  // At 60 fps dtMs ≈ 16.67, so the ratio ≈ 1 (full speed). This makes
+  // movement frame-rate independent — the game runs the same at any fps.
+  const scroll = SCROLL_SPEED * (dtMs / 16.67);
+
+  // Parallax layers scroll at different speeds to create a sense of depth.
+  // far and near offsets grow without bound — their draw functions key heights and
+  // identities off world coordinates derived from the offset, so any modulo wrap
+  // would cause a discontinuous jump in the seeded heights or lamp parity.
+  // mid can still be clamped because drawMid already does (offset % SEG_W) internally
+  // and every tile is visually identical.
+  bgOffsets.far  += scroll * 0.15;                              // distant hills — barely moves
+  bgOffsets.mid   = (bgOffsets.mid  + scroll * 0.45) % 10000;  // city skyline
+  bgOffsets.near += scroll * 1.00;                              // foreground — full speed
+
+  // Background always scrolls (for atmosphere on the start screen too);
+  // game logic only runs while actively playing.
+  if (state !== STATE.PLAYING) return;
+
+  // Accumulate score as a float for smooth time-based progression.
+  scoreFloat += SCORE_PER_SECOND * (dtMs / 1000);
+  score = Math.floor(scoreFloat);
+
+  // Spawn the finish line at the right edge early enough that it arrives at PLAYER_X
+  // exactly when score hits 81.  The threshold is derived from SCROLL_SPEED and
+  // SCORE_PER_SECOND so timing stays correct if either constant is tweaked.
+  if (!reached81 && finishLineX <= -80 && scoreFloat >= FINISH_SPAWN_THRESHOLD) {
+    finishLineX = FINISH_SPAWN_X;
+  }
+  // First time score reaches 81: trigger the milestone effects.
+  // The game does NOT end — the player keeps running.
+  if (score >= 81 && !reached81) {
+    reached81      = true;
+    toastStartTime = performance.now();
+  }
+  // Scroll the finish line leftward with the rest of the world.
+  if (finishLineX > -80) finishLineX -= scroll;
+
+  // Player physics
+  player.runCycle += dtMs / 1000;  // drives the leg animation
+  if (!player.onGround) {
+    player.vy += GRAVITY * (dtMs / 16.67);  // apply gravity
+    player.y  += player.vy * (dtMs / 16.67);
+    if (player.y + PLAYER_H_STAND >= GROUND_Y) {  // landed
+      player.y = GROUND_Y - PLAYER_H_STAND;
+      player.vy = 0;
+      player.onGround = true;
+    }
+  }
+
+  // When ducking the hitbox shrinks from the top down (feet stay pinned to the ground).
+  const effH = (player.ducking && player.onGround) ? PLAYER_H_DUCK : PLAYER_H_STAND;
+  const hitbox = {
+    x: player.x,
+    y: player.y + (PLAYER_H_STAND - effH),  // offset keeps the bottom edge fixed
+    w: player.w,
+    h: effH,
+  };
+
+  // Move all obstacles left and remove any that have scrolled off the left edge.
+  distSinceSpawn += scroll;
+  for (const o of obstacles) o.x -= scroll;
+  obstacles = obstacles.filter(o => o.x + o.w > -10);
+
+  // Spawn a new obstacle once enough distance has been covered.
+  if (distSinceSpawn >= nextSpawnDist) {
+    spawnObstacle();
+    distSinceSpawn = 0;
+    nextSpawnDist  = randRange(SPAWN_MIN_DIST, SPAWN_MAX_DIST);
+  }
+
+  // Collision detection — end the round on the first hit.
+  for (const o of obstacles) {
+    if (rectsOverlap(hitbox, o)) {
+      state = STATE.LOSE;
+      if (score > bestScore) {  // update personal best
+        bestScore = score;
+        localStorage.setItem('runTo81_best', String(bestScore));
+      }
+      showOverlay('lose');
+      return;
+    }
+  }
+}
+
+// ---- Rendering ----------------------------------------------------------
+// Every draw function below paints one visual layer.
+// render() calls them back-to-front: sky → hills → skyline → foreground → ground → gameplay.
+
+// Sky: a warm Nordic dusk gradient with a glowing sun near the horizon.
+function drawSky() {
+  const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+  g.addColorStop(0.00, '#1a1535');  // deep indigo top
+  g.addColorStop(0.45, '#3d2952');  // violet
+  g.addColorStop(0.78, '#c96a5a');  // warm dusk orange-red
+  g.addColorStop(1.00, '#f4a261');  // horizon glow
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, VIRTUAL_W, GROUND_Y);
+
+  // A soft sun sitting on the horizon
+  const sunX = VIRTUAL_W * 0.72;
+  const sunY = GROUND_Y - 30;
+  const sunGrad = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, 90);
+  sunGrad.addColorStop(0, 'rgba(255, 230, 180, 0.9)');
+  sunGrad.addColorStop(0.4, 'rgba(255, 180, 120, 0.35)');
+  sunGrad.addColorStop(1, 'rgba(255, 160, 100, 0)');
+  ctx.fillStyle = sunGrad;
+  ctx.fillRect(sunX - 120, sunY - 120, 240, 240);
+
+  ctx.fillStyle = 'rgba(255, 220, 160, 0.95)';
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, 26, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Deterministic pseudo-random from a seed number, returns a value in [0, 1).
+// Used for the hill shapes so they look identical on every frame — no jittering.
+function seeded(n) {
+  let x = Math.sin(n * 9301.13 + 49297.7) * 233280.1;
+  return x - Math.floor(x);
+}
+
+// Far layer: softly rolling hills scrolling very slowly to suggest distance.
+function drawFar(offset) {
+  ctx.fillStyle = '#2a1f47';
+  const baseY  = GROUND_Y - 20;
+  const period = 140;
+  const step   = 20;
+  // Sample at world-space positions snapped to the step grid.
+  // Each vertex has a fixed height and only its screen-x changes per frame,
+  // so crests stay locked to their world position and never skip or shimmer.
+  const startWorld = Math.floor((offset - period) / step) * step;
+  const endWorld   = offset + VIRTUAL_W + period;
+  ctx.beginPath();
+  ctx.moveTo(startWorld - offset, GROUND_Y);
+  for (let wx = startWorld; wx <= endWorld; wx += step) {
+    const h = 24 + Math.sin(wx * 0.018) * 10 + seeded(Math.floor(wx / period) + 1) * 12;
+    ctx.lineTo(wx - offset, baseY - h);
+  }
+  ctx.lineTo(VIRTUAL_W + period, GROUND_Y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Mid layer: the Tyholt/Trondheim skyline silhouette drawn as repeating tiles.
+function drawMid(offset) {
+  ctx.fillStyle = '#18122e';
+  const baseY = GROUND_Y - 8;
+  const SEG_W = 560;  // width of one repeating skyline tile in virtual pixels
+  // Draw enough tiles to cover the full screen width, plus one tile of bleed on each side.
+  const segments = Math.ceil(VIRTUAL_W / SEG_W) + 2;
+  for (let s = -1; s < segments; s++) {
+    const ox = s * SEG_W - (offset % SEG_W);
+    drawSkylineSegment(ox, baseY);
+  }
+  // Thin dark band just under the skyline to hint at a waterfront edge.
+  ctx.fillStyle = 'rgba(10, 8, 22, 0.5)';
+  ctx.fillRect(0, baseY, VIRTUAL_W, 8);
+}
+
+// Draws one repeating tile of the Tyholt skyline silhouette (left → right):
+//   1. Bryggen-style waterfront warehouses
+//   2. Norwegian residential houses (pitched roofs, chimneys, lit windows)
+//   3. Tyholt Tower + Nidaros Cathedral
+//   4. More residential houses to fill the tile
+// Layout budget (all offsets from ox, verified):
+//   Warehouses  [0 .. 160]   advance 162  gap 6 → 168
+//   Houses     [168 .. 323]  advance 160  gap 8 → 336
+//   Tower disc [336 .. 372]  advance  40  gap 6 → 382
+//   Cathedral  [382 .. 458]  advance  81      → 463
+//   Tail       [463 .. 557]  last body ends 557 < 560 ✓
+function drawSkylineSegment(ox, baseY) {
+  let x = ox;
+  const warehouseColors = '#18122e';
+  ctx.fillStyle = warehouseColors;
+
+  // 1. Bryggen-style waterfront warehouses
+  // Roofs flush with body — no overhang — so the 2 px gap is never pierced.
+  const whW = [26, 32, 36, 26, 32];
+  const whH = [32, 38, 32, 38, 32];
+  for (let i = 0; i < 5; i++) {
+    const w = whW[i], h = whH[i];
+    ctx.fillRect(x, baseY - h, w, h);
+    ctx.beginPath();
+    ctx.moveTo(x,         baseY - h);
+    ctx.lineTo(x + w / 2, baseY - h - 10);
+    ctx.lineTo(x + w,     baseY - h);
+    ctx.closePath();
+    ctx.fill();
+    x += w + 2;
+  }
+
+  // 2. Norwegian residential houses — pitched roofs, chimneys, lit windows
+  x += 6;
+  const houses = [
+    { w: 38, h: 52, roofH: 22 },
+    { w: 30, h: 44, roofH: 18 },
+    { w: 44, h: 58, roofH: 26 },
+    { w: 28, h: 40, roofH: 16 },
+  ];
+  for (const b of houses) {
+    ctx.fillStyle = warehouseColors;
+    ctx.fillRect(x, baseY - b.h, b.w, b.h);
+    ctx.beginPath();
+    ctx.moveTo(x,           baseY - b.h);
+    ctx.lineTo(x + b.w / 2, baseY - b.h - b.roofH);
+    ctx.lineTo(x + b.w,     baseY - b.h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(x + Math.floor(b.w * 0.65), baseY - b.h - Math.floor(b.roofH * 0.55), 5, Math.floor(b.roofH * 0.55));
+    ctx.fillStyle = 'rgba(255, 210, 140, 0.45)';
+    for (let wy = baseY - b.h + 10; wy < baseY - 8; wy += 18) {
+      for (let wx = x + 7; wx < x + b.w - 7; wx += 13) {
+        ctx.fillRect(wx, wy, 6, 8);
+      }
+    }
+    x += b.w + 5;
+  }
+  ctx.fillStyle = warehouseColors;
+
+  // 3a. Tyholt Tower (Tyholttårnet)
+  x += 8;
+  const tc       = x + 18;   // tower centre
+  const discCY   = baseY - 100;
+  const towerTip = baseY - 150;
+
+  // Tripod base ±10 from centre — inside the disc footprint
+  ctx.beginPath();
+  ctx.moveTo(tc - 10, baseY);
+  ctx.lineTo(tc + 10, baseY);
+  ctx.lineTo(tc +  4, discCY + 8);
+  ctx.lineTo(tc -  4, discCY + 8);
+  ctx.closePath();
+  ctx.fill();
+
+  // Disc radius 18 — spans exactly [x, x+36], touching neither neighbour
+  ctx.beginPath();
+  ctx.ellipse(tc, discCY, 18, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillRect(tc - 2, towerTip, 4, discCY - 8 - towerTip);
+  ctx.fillRect(tc - 1, towerTip - 12, 2, 12);
+
+  x += 40;
+
+  // 3b. Nidaros Cathedral — broad base with tall pointed spire
+  x += 6;
+  const cathX     = x;
+  const cathBaseW = 76;
+  const cathBaseH = 56;
+  ctx.fillRect(cathX, baseY - cathBaseH, cathBaseW, cathBaseH);
+
+  const ccx      = cathX + cathBaseW / 2;
+  const spireTop = baseY - 148;
+  ctx.beginPath();
+  ctx.moveTo(ccx - 10, baseY - cathBaseH);
+  ctx.lineTo(ccx - 10, baseY - cathBaseH - 28);
+  ctx.lineTo(ccx,      spireTop);
+  ctx.lineTo(ccx + 10, baseY - cathBaseH - 28);
+  ctx.lineTo(ccx + 10, baseY - cathBaseH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(ccx - 1, spireTop - 6, 2, 6);
+  ctx.fillRect(ccx - 4, spireTop - 4, 8, 2);
+  // Flanking spires — offset ±24, half-width 5 → outermost reach ±29 from ccx
+  // = cathX+[9..19] and cathX+[57..67], both inside [cathX, cathX+76]
+  for (const cdir of [-1, 1]) {
+    const fx = ccx + cdir * 24;
+    ctx.beginPath();
+    ctx.moveTo(fx - 5, baseY - cathBaseH);
+    ctx.lineTo(fx - 5, baseY - cathBaseH - 12);
+    ctx.lineTo(fx,     baseY - cathBaseH - 36);
+    ctx.lineTo(fx + 5, baseY - cathBaseH - 12);
+    ctx.lineTo(fx + 5, baseY - cathBaseH);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  x += cathBaseW + 5;
+
+  // 4. Tail houses — last body ends at ox+557, within the 560 px tile
+  const tailHouses = [
+    { w: 30, h: 46, roofH: 20 },
+    { w: 24, h: 38, roofH: 14 },
+    { w: 30, h: 46, roofH: 20 },
+  ];
+  for (const b of tailHouses) {
+    ctx.fillStyle = warehouseColors;
+    ctx.fillRect(x, baseY - b.h, b.w, b.h);
+    ctx.beginPath();
+    ctx.moveTo(x,           baseY - b.h);
+    ctx.lineTo(x + b.w / 2, baseY - b.h - b.roofH);
+    ctx.lineTo(x + b.w,     baseY - b.h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(x + Math.floor(b.w * 0.6), baseY - b.h - Math.floor(b.roofH * 0.5), 4, Math.floor(b.roofH * 0.5));
+    ctx.fillStyle = 'rgba(255, 210, 140, 0.45)';
+    for (let wy = baseY - b.h + 10; wy < baseY - 8; wy += 18) {
+      for (let wx = x + 7; wx < x + b.w - 7; wx += 13) {
+        ctx.fillRect(wx, wy, 6, 8);
+      }
+    }
+    x += b.w + 5;
+  }
+  ctx.fillStyle = warehouseColors;
+}
+
+// Near (foreground) layer: dark bushes and lamp posts scrolling at full speed.
+// Moving fastest, this layer gives the strongest sense of ground-level speed.
+function drawNear(offset) {
+  const baseY  = GROUND_Y;
+  const period = 180;
+  // Iterate over world-tile indices so each tile's identity (and lamp parity)
+  // is permanently tied to its world position, never to a screen-space counter.
+  const firstTile = Math.floor((offset - period) / period);
+  const lastTile  = Math.floor((offset + VIRTUAL_W + period) / period);
+  for (let wi = firstTile; wi <= lastTile; wi++) {
+    const sx = wi * period - offset;  // screen position — scrolls left as offset grows
+
+    // A little clump of foliage
+    ctx.fillStyle = '#0a0818';
+    ctx.beginPath();
+    ctx.arc(sx + 20, baseY - 6,  14, 0, Math.PI * 2);
+    ctx.arc(sx + 36, baseY - 12, 18, 0, Math.PI * 2);
+    ctx.arc(sx + 54, baseY - 7,  14, 0, Math.PI * 2);
+    ctx.fill();
+
+    // A slim lamp post on every other world tile — wi is stable, so this never flickers
+    if (wi % 2 === 0) {
+      const lx = sx + 120;
+      ctx.fillStyle = '#0a0818';
+      ctx.fillRect(lx, baseY - 44, 2, 44);
+      ctx.fillRect(lx - 5, baseY - 46, 12, 3);
+      ctx.fillStyle = 'rgba(255, 210, 140, 0.25)';
+      ctx.beginPath();
+      ctx.arc(lx + 1, baseY - 45, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// Ground: a gradient asphalt strip with a bright horizon line.
+// The gradient makes it clearly visible against the dark near-layer silhouettes.
+function drawGround() {
+  // Asphalt in dusk light — dark blue-grey, clearly distinct from the sky
+  const g = ctx.createLinearGradient(0, GROUND_Y, 0, VIRTUAL_H);
+  g.addColorStop(0,   '#3a3260');  // top edge catches dusk glow
+  g.addColorStop(0.3, '#2a2248');  // mid asphalt tone
+  g.addColorStop(1,   '#1a1530');  // shadows toward bottom
+  ctx.fillStyle = g;
+  ctx.fillRect(0, GROUND_Y, VIRTUAL_W, VIRTUAL_H - GROUND_Y);
+
+  // Horizon line — more prominent so the ground edge reads clearly
+  ctx.fillStyle = 'rgba(244, 162, 97, 0.45)';
+  ctx.fillRect(0, GROUND_Y, VIRTUAL_W, 2);
+}
+
+// Draws the player. Uses sprite images when loaded (full-body, no separate head/legs).
+// Falls back to the original drawn body + head per state if an image is missing.
+function drawPlayer() {
+  const isDuck = player.ducking && player.onGround;
+  const effH   = isDuck ? PLAYER_H_DUCK : PLAYER_H_STAND;
+  // topY keeps the bottom edge pinned to the player's feet regardless of ducking.
+  const topY   = player.y + (PLAYER_H_STAND - effH);
+
+  // --- Sprite path ---
+  // Sprites are drawn larger than the hitbox (scale > 1) for visual presence.
+  // Bottom edge stays pinned to the hitbox bottom; image is centred horizontally.
+  const SPRITE_SCALE = 1.3;
+  if (isDuck && crouchingLoaded) {
+    const dw = PLAYER_W * SPRITE_SCALE, dh = PLAYER_H_DUCK * SPRITE_SCALE;
+    ctx.drawImage(crouchingImg,
+      player.x + (PLAYER_W - dw) / 2,
+      player.y + PLAYER_H_STAND - dh,
+      dw, dh);
+    return;
+  }
+  if (!isDuck && runningLoaded) {
+    const dw = PLAYER_W * SPRITE_SCALE, dh = PLAYER_H_STAND * SPRITE_SCALE;
+    ctx.drawImage(runningImg,
+      player.x + (PLAYER_W - dw) / 2,
+      player.y + PLAYER_H_STAND - dh,
+      dw, dh);
+    return;
+  }
+
+  // --- Fallback: drawn body + animated legs + head.png / circle ---
+  const bodyW = player.w;
+  const bodyH = effH - HEAD_R * 2 + 4;
+  const bodyX = player.x;
+  const bodyY = topY + HEAD_R * 2 - 4;
+
+  ctx.fillStyle = '#e8c88a';
+  roundRect(bodyX, bodyY, bodyW, bodyH, 8);
+  ctx.fill();
+
+  if (player.onGround && !isDuck) {
+    const phase = Math.sin(player.runCycle * 14);
+    ctx.fillStyle = '#2a1f47';
+    const legY = bodyY + bodyH - 4;
+    ctx.fillRect(bodyX + 4,          legY, 8, 6 + phase * 2);
+    ctx.fillRect(bodyX + bodyW - 12, legY, 8, 6 - phase * 2);
+  }
+
+  const headCX = bodyX + bodyW / 2;
+  const headCY = topY + HEAD_R;
+
+  if (headLoaded) {
+    const size = HEAD_R * 2 + 4;
+    ctx.drawImage(headImg, headCX - size / 2, headCY - size / 2, size, size);
+  } else {
+    ctx.fillStyle = '#f4a261';
+    ctx.beginPath();
+    ctx.arc(headCX, headCY, HEAD_R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2a1f47';
+    ctx.fillRect(headCX - 5, headCY - 2, 2, 2);
+    ctx.fillRect(headCX + 3, headCY - 2, 2, 2);
+  }
+}
+
+// Traces a rounded rectangle path. Caller must call ctx.fill() or ctx.stroke() afterward.
+function roundRect(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x,     y + h, r);
+  ctx.arcTo(x,     y + h, x,     y,     r);
+  ctx.arcTo(x,     y,     x + w, y,     r);
+  ctx.closePath();
+}
+
+// Draws the checkered finish-line banner that scrolls past the player when score hits 81.
+// It is spawned just ahead of the player and then scrolls left with the world.
+function drawFinishLine() {
+  if (finishLineX < -60 || finishLineX > VIRTUAL_W + 10) return;  // off screen — skip
+  const fx = Math.round(finishLineX);
+  const cols = 4, cellW = 9, cellH = 10;
+  for (let row = 0; row * cellH < GROUND_Y; row++) {
+    for (let col = 0; col < cols; col++) {
+      ctx.fillStyle = (row + col) % 2 === 0
+        ? 'rgba(255,255,255,0.88)'
+        : 'rgba(0,0,0,0.82)';
+      ctx.fillRect(fx + col * cellW, row * cellH, cellW, cellH);
+    }
+  }
+  // "81" label floating above the line
+  ctx.save();
+  ctx.fillStyle = '#ffd89b';
+  ctx.font = 'bold 15px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('81', fx + cols * cellW / 2, GROUND_Y - 6);
+  ctx.restore();
+}
+
+// Draws the "You made it to 81!" banner that fades in then out after the milestone.
+function drawToast() {
+  if (toastStartTime < 0) return;
+  const elapsed = performance.now() - toastStartTime;
+  if (elapsed > TOAST_DURATION) return;
+
+  // Opacity: fade in over 380 ms, hold at full, then fade out over 700 ms.
+  const fadeIn = 380, fadeOut = 700;
+  let a;
+  if (elapsed < fadeIn)                        a = elapsed / fadeIn;
+  else if (elapsed > TOAST_DURATION - fadeOut) a = (TOAST_DURATION - elapsed) / fadeOut;
+  else                                          a = 1;
+
+  ctx.save();
+  ctx.globalAlpha = a;
+
+  const tw = 470, th = 54, tx = (VIRTUAL_W - tw) / 2, ty = 48;
+  ctx.fillStyle = 'rgba(8, 4, 22, 0.9)';
+  roundRect(tx, ty, tw, th, 11);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(255, 216, 155, 0.8)';
+  ctx.lineWidth = 1.5;
+  roundRect(tx, ty, tw, th, 11);
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd89b';
+  ctx.font = 'bold 17px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Du nådde 81!  🎁  Premien din venter…', VIRTUAL_W / 2, ty + th / 2);
+
+  ctx.restore();
+}
+
+
+function drawObstacles() {
+  for (const o of obstacles) {
+    if (o.type === 'tall') {
+      // Pedestrian — player must jump over it.
+      const bx = o.x, by = o.y, bw = o.w, bh = o.h;
+
+      if (pedestrianLoaded) {
+        const SPRITE_SCALE = 1.5;
+        const dw = bw * SPRITE_SCALE, dh = bh * SPRITE_SCALE;
+        ctx.drawImage(pedestrianImg, bx + (bw - dw) / 2, by + bh - dh, dw, dh);
+      } else {
+        // Fallback: wrapped gift box
+        const giftColors = [
+          { box: '#9b2525', lid: '#c03030', ribbon: '#ffd89b' },
+          { box: '#1a3f6a', lid: '#2558a0', ribbon: '#f4a261' },
+          { box: '#1f5a2a', lid: '#2a7a38', ribbon: '#ffd89b' },
+        ][o.color ?? 0];
+
+        ctx.fillStyle = giftColors.box;
+        ctx.fillRect(bx, by + 6, bw, bh - 6);
+
+        ctx.fillStyle = giftColors.lid;
+        ctx.fillRect(bx - 2, by, bw + 4, 8);
+
+        ctx.fillStyle = giftColors.ribbon;
+        ctx.fillRect(bx + bw / 2 - 2, by + 6, 4, bh - 6);
+        ctx.fillRect(bx, by + 6 + (bh - 6) * 0.42, bw, 4);
+
+        const bowX = bx + bw / 2;
+        const bowY = by + 2;
+        ctx.beginPath();
+        ctx.ellipse(bowX - 5, bowY - 4, 5, 3.5, -0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(bowX + 5, bowY - 4, 5, 3.5,  0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(bowX, bowY - 3, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.10)';
+        ctx.fillRect(bx, by + 6, 3, bh - 6);
+        ctx.fillRect(bx - 2, by, bw + 4, 2);
+      }
+    } else {
+      // Seagull — player must duck under
+      const cx = o.x + o.w / 2;
+      const cy = o.y + o.h * 0.3;
+      const ws = 27; // half-wingspan
+      // Per-bird wing flap phase, smooth and continuous
+      const flap = Math.sin(performance.now() / 380 + o.x * 0.07) * 6;
+
+      // Dorsal wing surface — cool blue-grey reads against the warm dusk sky
+      ctx.fillStyle = '#b8ccd8';
+      // Left wing — cubic bezier gives a natural leading-edge bow and tapered tip
+      ctx.beginPath();
+      ctx.moveTo(cx - 2, cy);
+      ctx.bezierCurveTo(
+        cx - ws * 0.35, cy - 16 + flap,
+        cx - ws * 0.8,  cy - 9  + flap * 0.55,
+        cx - ws,        cy - 1  + flap * 0.3
+      );
+      ctx.bezierCurveTo(cx - ws * 0.6, cy + 4, cx - ws * 0.2, cy + 2, cx - 2, cy + 1);
+      ctx.closePath();
+      ctx.fill();
+      // Right wing
+      ctx.beginPath();
+      ctx.moveTo(cx + 2, cy);
+      ctx.bezierCurveTo(
+        cx + ws * 0.35, cy - 16 + flap,
+        cx + ws * 0.8,  cy - 9  + flap * 0.55,
+        cx + ws,        cy - 1  + flap * 0.3
+      );
+      ctx.bezierCurveTo(cx + ws * 0.6, cy + 4, cx + ws * 0.2, cy + 2, cx + 2, cy + 1);
+      ctx.closePath();
+      ctx.fill();
+
+      // Underwing highlight — lighter near-white band on the trailing lower face
+      ctx.fillStyle = 'rgba(225, 242, 252, 0.65)';
+      ctx.beginPath();
+      ctx.moveTo(cx - 3, cy + 1);
+      ctx.bezierCurveTo(cx - ws * 0.4, cy - 2 + flap * 0.35, cx - ws * 0.75, cy + 1 + flap * 0.2, cx - ws * 0.92, cy + 1 + flap * 0.15);
+      ctx.bezierCurveTo(cx - ws * 0.6, cy + 4, cx - ws * 0.2, cy + 2.5, cx - 3, cy + 1.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx + 3, cy + 1);
+      ctx.bezierCurveTo(cx + ws * 0.4, cy - 2 + flap * 0.35, cx + ws * 0.75, cy + 1 + flap * 0.2, cx + ws * 0.92, cy + 1 + flap * 0.15);
+      ctx.bezierCurveTo(cx + ws * 0.6, cy + 4, cx + ws * 0.2, cy + 2.5, cx + 3, cy + 1.5);
+      ctx.closePath();
+      ctx.fill();
+
+      // Wing-tip darkening — outer ~30 % gets a translucent grey-blue overlay for depth
+      ctx.fillStyle = 'rgba(70, 105, 138, 0.5)';
+      ctx.beginPath();
+      ctx.moveTo(cx - ws * 0.66, cy - 5 + flap * 0.6);
+      ctx.bezierCurveTo(cx - ws * 0.88, cy - 8 + flap * 0.45, cx - ws, cy - 1 + flap * 0.3, cx - ws * 0.85, cy + 2.5);
+      ctx.bezierCurveTo(cx - ws * 0.66, cy + 3.5, cx - ws * 0.6, cy - 2 + flap * 0.5, cx - ws * 0.66, cy - 5 + flap * 0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx + ws * 0.66, cy - 5 + flap * 0.6);
+      ctx.bezierCurveTo(cx + ws * 0.88, cy - 8 + flap * 0.45, cx + ws, cy - 1 + flap * 0.3, cx + ws * 0.85, cy + 2.5);
+      ctx.bezierCurveTo(cx + ws * 0.66, cy + 3.5, cx + ws * 0.6, cy - 2 + flap * 0.5, cx + ws * 0.66, cy - 5 + flap * 0.6);
+      ctx.closePath();
+      ctx.fill();
+
+      // Body — near-white underbelly catches the dusk glow
+      ctx.fillStyle = '#eef4f8';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + 1, 7, 3.5, 0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Head — slightly rounder and lighter than the wing surface
+      ctx.fillStyle = '#f0f5f8';
+      ctx.beginPath();
+      ctx.arc(cx + 7, cy - 2.5, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eye
+      ctx.fillStyle = '#1e1a2e';
+      ctx.beginPath();
+      ctx.arc(cx + 8.5, cy - 3.5, 1.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Beak — upper mandible darker amber, lower lighter; more natural than a flat wedge
+      ctx.fillStyle = '#b87820';
+      ctx.beginPath();
+      ctx.moveTo(cx + 10.5, cy - 3.2);
+      ctx.lineTo(cx + 16,   cy - 1.5);
+      ctx.lineTo(cx + 11,   cy - 0.8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#d89030';
+      ctx.beginPath();
+      ctx.moveTo(cx + 11,   cy - 0.8);
+      ctx.lineTo(cx + 16,   cy - 1.5);
+      ctx.lineTo(cx + 11.5, cy + 0.6);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
+// HUD: score badge (top-left) and goal badge (top-right).
+// Once the player passes 81 the goal badge turns green and shows a checkmark.
+function drawHUD() {
+  ctx.save();
+  ctx.font = '22px Georgia, serif';
+  ctx.textBaseline = 'top';
+
+  // Score, left
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.fillRect(14, 14, 140, 36);
+  ctx.fillStyle = '#f6e9d2';
+  ctx.textAlign = 'left';
+  ctx.fillText('Poeng ' + String(score).padStart(2, '0'), 24, 20);
+
+  // Goal, right
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.fillRect(VIRTUAL_W - 154, 14, 140, 36);
+  ctx.fillStyle = reached81 ? '#a8e8a0' : '#ffd89b';
+  ctx.textAlign = 'right';
+  ctx.fillText(reached81 ? '81 ✓' : 'Mål 81', VIRTUAL_W - 24, 20);
+
+  // Best score — smaller, under the score
+  if (bestScore > 0) {
+    ctx.font = '13px Georgia, serif';
+    ctx.fillStyle = 'rgba(246, 233, 210, 0.6)';
+    ctx.textAlign = 'left';
+    ctx.fillText('Best ' + bestScore, 24, 54);
+  }
+  ctx.restore();
+}
+
+// Master render: clears the canvas then draws every layer back-to-front.
+function render() {
+  // Temporarily reset the transform to clear the full physical canvas (including
+  // the letterbox bars), then restore it so virtual-coord drawing continues normally.
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#05030d';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  // Background — always drawn so the world feels alive even on the start screen.
+  drawSky();
+  drawFar(bgOffsets.far);    // distant hills (slowest parallax)
+  drawMid(bgOffsets.mid);    // city skyline silhouette
+  drawNear(bgOffsets.near);  // foreground bushes and lamp posts
+  drawGround();               // asphalt strip with horizon line
+
+  // Gameplay elements — only shown while a round is active or on the end screens.
+  if (state === STATE.PLAYING || state === STATE.LOSE || state === STATE.WIN) {
+    drawFinishLine();  // checkered banner that appears at score 81
+    drawObstacles();   // gift boxes (jump) and seagulls (duck)
+    drawPlayer();
+    drawHUD();
+    drawToast();       // "You made it!" notification (fades in/out after milestone)
+  }
+}
+
+// ---- Main loop ----------------------------------------------------------
+// requestAnimationFrame drives this at ~60 fps.
+function loop(now) {
+  // Clamp the delta to 50 ms so a tab switch or slow device can't cause a huge physics jump.
+  const dt = Math.min(now - lastTime, 50);
+  lastTime = now;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+// Prime lastTime before the very first frame so the initial dt is ~0.
+requestAnimationFrame((t) => { lastTime = t; requestAnimationFrame(loop); });
+
+// ---- Overlay / screen wiring --------------------------------------------
+// The three overlay <div>s sit on top of the canvas. We show and hide them
+// by toggling the "hidden" CSS class (display:none). The canvas keeps running
+// underneath at all times.
+const startScreen = document.getElementById('startScreen');
+const winScreen   = document.getElementById('winScreen');
+const loseScreen  = document.getElementById('loseScreen');
+const startBtn    = document.getElementById('startBtn');
+const retryBtn    = document.getElementById('retryBtn');
+const winScoreEl   = document.getElementById('winScore');
+const losePrizeBtn = document.getElementById('losePrizeBtn');
+
+// Shows the correct overlay and fills in its dynamic text.
+// The lose screen adapts: if the player reached 81 it shows a celebratory
+// message and the prize link; otherwise it shows the standard "So close!" copy.
+function showOverlay(which) {
+  // Hide everything first, then reveal only what's needed.
+  startScreen.classList.add('hidden');
+  winScreen.classList.add('hidden');
+  loseScreen.classList.add('hidden');
+
+  if (which === 'start') {
+    startScreen.classList.remove('hidden');
+  }
+
+  if (which === 'win') {
+    winScoreEl.textContent = String(score);
+    winScreen.classList.remove('hidden');
+    // Remove and re-add the 'show' class to restart the CSS entrance animation from scratch.
+    winScreen.classList.remove('show');
+    void winScreen.offsetWidth;  // force a reflow so the browser notices the class removal
+    winScreen.classList.add('show');
+  }
+
+  if (which === 'lose') {
+    // Show the prize link only if the player reached 81.
+    if (reached81) {
+      losePrizeBtn.classList.remove('hidden');
+    } else {
+      losePrizeBtn.classList.add('hidden');
+    }
+    loseScreen.classList.remove('hidden');
+  }
+}
+
+// Starts (or restarts) a round: resets all game state and hides all overlays.
+function beginPlay() {
+  resetGame();
+  state = STATE.PLAYING;
+  startScreen.classList.add('hidden');
+  winScreen.classList.add('hidden');
+  loseScreen.classList.add('hidden');
+}
+
+startBtn.addEventListener('click', beginPlay);
+retryBtn.addEventListener('click', beginPlay);
+
+// Keyboard shortcuts: Space / Enter / Up starts or retries without clicking a button.
+window.addEventListener('keydown', (e) => {
+  if (state === STATE.START && (e.code === 'Space' || e.code === 'Enter' || e.code === 'ArrowUp')) {
+    e.preventDefault();
+    beginPlay();
+  } else if (state === STATE.LOSE && (e.code === 'Space' || e.code === 'Enter')) {
+    e.preventDefault();
+    beginPlay();
+  }
+});
+</script>
+</body>
+</html>

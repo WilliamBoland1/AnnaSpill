@@ -1,0 +1,13 @@
+Change the standing blocks to people
+
+improve the person model, this can be a jpg, person running and crouching with a head jpg
+
+have houses not overlap
+
+now the background jumps i wish for it to be continous
+
+the lights are swtiching on and off, make them on contatnyl
+
+the finish screen there is very little distance between get your prize and try again, increase this
+
+remove the sign
