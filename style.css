@@ -138,3 +138,32 @@ html, body {
   opacity: 0.7;
   font-style: italic;
 }
+
+/* -----------------------------------------------------------
+   Lose screen — entrance animation
+----------------------------------------------------------- */
+#loseScreen.show {
+  animation: winOverlayIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+#loseScreen.show h1 {
+  animation: winTitlePop 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.10s both;
+}
+#loseScreen.show h2 {
+  animation: winItemRise 0.5s ease 0.35s both;
+}
+#loseScreen.show p.score {
+  animation: winItemRise 0.5s ease 0.50s both;
+}
+#loseScreen.show .btn.prize {
+  animation: winItemRise 0.5s ease 0.65s both,
+             pulse 2s ease-in-out 1.2s infinite;
+}
+#loseScreen.show .btn:not(.prize) {
+  animation: winItemRise 0.5s ease 0.72s both;
+}
+
+/* Gold title when celebrating (reached 81 then died) */
+#loseScreen.celebrated h1 {
+  color: #a8e8a0;
+  text-shadow: 0 2px 20px rgba(100, 220, 100, 0.45);
+}

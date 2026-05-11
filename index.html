@@ -13,7 +13,7 @@
 <!-- Start screen -->
 <div id="startScreen" class="overlay">
   <h1>Tyholt Backyard Ultra</h1>
-  <p class="score">Mål: nå en poengsum på <strong>81 for premie</strong></p>
+  <p class="score">Hvis du klarer å nå en poengsum på <strong>81, venter det premie</strong></p>
   <button class="btn" id="startBtn">Start</button>
   <p class="hint">↑ / Space / trykk øverst = hopp &nbsp;·&nbsp; ↓ / S / trykk nederst = bøy deg</p>
 </div>
@@ -33,6 +33,9 @@
 
 <!-- Game over screen -->
 <div id="loseScreen" class="overlay hidden">
+  <h1 id="loseTitle">Nesten!</h1>
+  <h2 id="loseMessage">Kom igjen, du hadde ikke langt igjen!</h2>
+  <p class="score">Sluttpoeng: <span id="loseScore">0</span></p>
   <a class="btn prize hidden" id="losePrizeBtn" href="https://williamboland1.github.io/Anna/" target="_blank" rel="noopener">
     Trykk her for å hente premien din 🎁
   </a>
@@ -1003,8 +1006,11 @@ const winScreen   = document.getElementById('winScreen');
 const loseScreen  = document.getElementById('loseScreen');
 const startBtn    = document.getElementById('startBtn');
 const retryBtn    = document.getElementById('retryBtn');
-const winScoreEl   = document.getElementById('winScore');
-const losePrizeBtn = document.getElementById('losePrizeBtn');
+const winScoreEl    = document.getElementById('winScore');
+const losePrizeBtn  = document.getElementById('losePrizeBtn');
+const loseTitleEl   = document.getElementById('loseTitle');
+const loseMessageEl = document.getElementById('loseMessage');
+const loseScoreEl   = document.getElementById('loseScore');
 
 // Shows the correct overlay and fills in its dynamic text.
 // The lose screen adapts: if the player reached 81 it shows a celebratory
@@ -1029,13 +1035,22 @@ function showOverlay(which) {
   }
 
   if (which === 'lose') {
-    // Show the prize link only if the player reached 81.
+    loseScoreEl.textContent = String(score);
     if (reached81) {
+      loseTitleEl.textContent   = 'Gratulerer! 🎉';
+      loseMessageEl.textContent = 'Du klarte det!';
+      loseScreen.classList.add('celebrated');
       losePrizeBtn.classList.remove('hidden');
     } else {
+      loseTitleEl.textContent   = 'Nesten!';
+      loseMessageEl.textContent = 'Kom igjen, du hadde ikke langt igjen!';
+      loseScreen.classList.remove('celebrated');
       losePrizeBtn.classList.add('hidden');
     }
     loseScreen.classList.remove('hidden');
+    loseScreen.classList.remove('show');
+    void loseScreen.offsetWidth;
+    loseScreen.classList.add('show');
   }
 }
 
@@ -1046,6 +1061,7 @@ function beginPlay() {
   startScreen.classList.add('hidden');
   winScreen.classList.add('hidden');
   loseScreen.classList.add('hidden');
+  loseScreen.classList.remove('show', 'celebrated');
 }
 
 startBtn.addEventListener('click', beginPlay);
