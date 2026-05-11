@@ -657,9 +657,8 @@ function drawPlayer() {
   // --- Sprite path ---
   // Sprites are drawn larger than the hitbox (scale > 1) for visual presence.
   // Bottom edge stays pinned to the hitbox bottom; image is centred horizontally.
-  const SPRITE_SCALE = 1.3;
   if (isDuck && crouchingLoaded) {
-    const dw = PLAYER_W * SPRITE_SCALE, dh = PLAYER_H_DUCK * SPRITE_SCALE;
+    const dw = PLAYER_W * 1.3, dh = PLAYER_H_DUCK * 1.3;
     ctx.drawImage(crouchingImg,
       player.x + (PLAYER_W - dw) / 2,
       player.y + PLAYER_H_STAND - dh,
@@ -667,7 +666,7 @@ function drawPlayer() {
     return;
   }
   if (!isDuck && runningLoaded) {
-    const dw = PLAYER_W * SPRITE_SCALE, dh = PLAYER_H_STAND * SPRITE_SCALE;
+    const dw = PLAYER_W * 1.15, dh = PLAYER_H_STAND * 1.15;
     ctx.drawImage(runningImg,
       player.x + (PLAYER_W - dw) / 2,
       player.y + PLAYER_H_STAND - dh,
@@ -789,7 +788,7 @@ function drawObstacles() {
       const bx = o.x, by = o.y, bw = o.w, bh = o.h;
 
       if (pedestrianLoaded) {
-        const SPRITE_SCALE = 1.5;
+        const SPRITE_SCALE = 1.65;
         const dw = bw * SPRITE_SCALE, dh = bh * SPRITE_SCALE;
         ctx.drawImage(pedestrianImg, bx + (bw - dw) / 2, by + bh - dh, dw, dh);
       } else {
