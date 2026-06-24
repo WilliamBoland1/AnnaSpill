@@ -82,20 +82,23 @@ function resize() {
   if (cssH > cssW) {
     // Portrait: show only the left 450 virtual pixels of the 900px wide canvas.
     // This doubles the game's visible height on screen (347px vs 173px on a typical phone).
-    // The player at virtual x=180 still sees ~270px of runway ahead (~1 second at normal speed).
     const PORTRAIT_VW = 450;
+    PLAYER_X = 100;  // ~22% of portrait viewport — matches landscape's left-of-centre feel
     s  = cssW / PORTRAIT_VW;
     ox = 0;
     oy = (cssH - VIRTUAL_H * s) / 2;
     effectiveVW = PORTRAIT_VW;
   } else {
     // Landscape / desktop: fit the full 900×400 virtual canvas with letterboxing.
+    PLAYER_X = Math.round(VIRTUAL_W * 0.20);  // restore 180 for landscape/desktop
     s  = Math.min(cssW / VIRTUAL_W, cssH / VIRTUAL_H);
     ox = (cssW - VIRTUAL_W * s) / 2;
     oy = (cssH - VIRTUAL_H * s) / 2;
     effectiveVW = VIRTUAL_W;
   }
   scale = s; offsetX = ox; offsetY = oy;
+  // Sync live player position if a round is already in progress
+  if (player) player.x = PLAYER_X;
 
   // Physical backing store is in device pixels so retina screens stay sharp.
   canvas.width        = Math.round(cssW * dpr);
@@ -145,7 +148,7 @@ crouchingImg.src = 'images/crouching.png';
 // ---- Game constants -----------------------------------------------------
 // These values control the feel and difficulty. Tweak them to adjust the game.
 const GROUND_Y = 340;           // y-coordinate of the ground surface
-const PLAYER_X = VIRTUAL_W * 0.20;  // player is fixed at 20% from the left
+let PLAYER_X = VIRTUAL_W * 0.20;  // player is fixed at 20% from the left (adjusted in portrait)
 
 const PLAYER_W       = 34;  // player body width
 const PLAYER_H_STAND = 70;  // full height when standing (body + head)
