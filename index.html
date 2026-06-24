@@ -962,7 +962,10 @@ function render() {
   // the letterbox bars), then restore it so virtual-coord drawing continues normally.
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#05030d';
+  const _bgGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  _bgGrad.addColorStop(0, '#1a1535');  // matches game sky top — letterbox blends in
+  _bgGrad.addColorStop(1, '#0a0818');  // matches near-layer darkness at ground
+  ctx.fillStyle = _bgGrad;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
 

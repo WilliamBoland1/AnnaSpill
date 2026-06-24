@@ -167,3 +167,33 @@ html, body {
   color: #a8e8a0;
   text-shadow: 0 2px 20px rgba(100, 220, 100, 0.45);
 }
+
+/* -----------------------------------------------------------
+   Portrait mobile refinements
+   The game canvas stays landscape (900×400 virtual), so these
+   rules only touch the overlay screens — tightening margins
+   and shrinking the prize button so nothing overflows.
+----------------------------------------------------------- */
+@media (orientation: portrait) {
+  .overlay {
+    padding: 20px;
+  }
+  .overlay h2 {
+    margin-bottom: 16px;
+  }
+  .overlay p.score {
+    margin-bottom: 16px;
+  }
+  .overlay .btn.prize {
+    padding: 16px 28px;
+    font-size: clamp(15px, 4vw, 20px);
+  }
+  .hint {
+    margin-top: 12px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  #retryBtn {
+    margin-top: 16px;
+  }
+}
