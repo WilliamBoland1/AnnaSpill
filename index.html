@@ -67,10 +67,9 @@ const ctx    = canvas.getContext('2d');
 const VIRTUAL_W = 900;  // virtual game width  — all coordinates use this
 const VIRTUAL_H = 400;  // virtual game height
 
-let scale      = 1;  // CSS pixels per virtual pixel (updated on resize)
-let offsetX    = 0;  // horizontal letterbox margin in CSS pixels
-let offsetY    = 0;  // vertical   letterbox margin in CSS pixels
-let effectiveVW = VIRTUAL_W;  // virtual width actually shown (narrower in portrait)
+let scale   = 1;  // CSS pixels per virtual pixel (updated on resize)
+let offsetX = 0;  // horizontal letterbox margin in CSS pixels
+let offsetY = 0;  // vertical   letterbox margin in CSS pixels
 
 // Recalculates the canvas size and transform whenever the window is resized.
 function resize() {
@@ -78,27 +77,11 @@ function resize() {
   const cssW = window.innerWidth;
   const cssH = window.innerHeight;
 
-  let s, ox, oy;
-  if (cssH > cssW) {
-    // Portrait: show only the left 450 virtual pixels of the 900px wide canvas.
-    // This doubles the game's visible height on screen (347px vs 173px on a typical phone).
-    const PORTRAIT_VW = 450;
-    PLAYER_X = 100;  // ~22% of portrait viewport — matches landscape's left-of-centre feel
-    s  = cssW / PORTRAIT_VW;
-    ox = 0;
-    oy = (cssH - VIRTUAL_H * s) / 2;
-    effectiveVW = PORTRAIT_VW;
-  } else {
-    // Landscape / desktop: fit the full 900×400 virtual canvas with letterboxing.
-    PLAYER_X = Math.round(VIRTUAL_W * 0.20);  // restore 180 for landscape/desktop
-    s  = Math.min(cssW / VIRTUAL_W, cssH / VIRTUAL_H);
-    ox = (cssW - VIRTUAL_W * s) / 2;
-    oy = (cssH - VIRTUAL_H * s) / 2;
-    effectiveVW = VIRTUAL_W;
-  }
-  scale = s; offsetX = ox; offsetY = oy;
-  // Sync live player position if a round is already in progress
-  if (player) player.x = PLAYER_X;
+  // Scale the 900×400 virtual canvas to fill the screen, keeping aspect ratio.
+  const s = Math.min(cssW / VIRTUAL_W, cssH / VIRTUAL_H);
+  scale   = s;
+  offsetX = (cssW - VIRTUAL_W * s) / 2;
+  offsetY = (cssH - VIRTUAL_H * s) / 2;
 
   // Physical backing store is in device pixels so retina screens stay sharp.
   canvas.width        = Math.round(cssW * dpr);
@@ -107,7 +90,7 @@ function resize() {
   canvas.style.height = cssH + 'px';
 
   // One transform maps every draw call from virtual coords → device pixels.
-  ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * oy);
+  ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * offsetX, dpr * offsetY);
   ctx.imageSmoothingEnabled = true;
 }
 window.addEventListener('resize', resize);
@@ -148,7 +131,7 @@ crouchingImg.src = 'images/crouching.png';
 // ---- Game constants -----------------------------------------------------
 // These values control the feel and difficulty. Tweak them to adjust the game.
 const GROUND_Y = 340;           // y-coordinate of the ground surface
-let PLAYER_X = VIRTUAL_W * 0.20;  // player is fixed at 20% from the left (adjusted in portrait)
+const PLAYER_X = VIRTUAL_W * 0.20;  // player is fixed at 20% from the left
 
 const PLAYER_W       = 34;  // player body width
 const PLAYER_H_STAND = 70;  // full height when standing (body + head)
@@ -958,10 +941,10 @@ function drawHUD() {
 
   // Goal, right
   ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-  ctx.fillRect(effectiveVW - 154, 14, 140, 36);
+  ctx.fillRect(VIRTUAL_W - 154, 14, 140, 36);
   ctx.fillStyle = reached81 ? '#a8e8a0' : '#ffd89b';
   ctx.textAlign = 'right';
-  ctx.fillText(reached81 ? '81 ✓' : 'Mål 81', effectiveVW - 24, 20);
+  ctx.fillText(reached81 ? '81 ✓' : 'Mål 81', VIRTUAL_W - 24, 20);
 
   // Best score — smaller, under the score
   if (bestScore > 0) {
@@ -979,7 +962,10 @@ function render() {
   // the letterbox bars), then restore it so virtual-coord drawing continues normally.
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#1a1535';  // matches game sky top exactly — no seam at game edges
+  const _bgGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  _bgGrad.addColorStop(0, '#1a1535');  // matches game sky top — letterbox blends in
+  _bgGrad.addColorStop(1, '#0a0818');  // matches near-layer darkness at ground
+  ctx.fillStyle = _bgGrad;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
 
